@@ -1,0 +1,253 @@
+﻿%lexer
+
+\n										^NEWLINE
+read									^READ
+let										^LET
+match									^MATCH
+with									^WITH
+as										^AS
+true									^TRUE
+false									^FALSE
+"&&"									^ANDAND
+"||"									^OROR
+"++"									^INC
+"--"									^DEC
+"|"										^(|)
+"+"										^(+)
+"-"										^(-)
+"="										^(=)
+"*"										^(*)
+"/"										^(/)
+"%"										^(%)
+";"										^(;)
+"("										^(()
+")"										^())
+"{"										^({)
+"}"										^(})
+"["										^([)
+"]"										^(])
+","										^(,)
+"."										^(.)
+":"										^(:)
+">"										^GT
+">="									^GE
+"<"		    							^LT
+"<="	    							^LE
+"=="	    							^EQ
+"!="	    							^NE
+(_|[a-z]|[A-Z])(_|[a-z]|[A-Z]|[0-9])*	^ID
+("-"[0-9]+)|([0-9]+)					^NUM
+"0x"([0-9]|[a-f]|[A-F])+				^HEX
+"=>"
+{
+	var sb = new StringBuilder();
+	for (;;)
+	{
+		int ch = rd.Read().ch;
+		if (ch == -1) throw new Exception("EOF in string");
+		if (ch == '\n')
+			break;
+		if (ch == '\\')
+			ch = rd.Read().ch;
+		else
+			sb.Append((char)ch);
+	}
+
+	rd.SetMatch();
+	rd.EndToken(out tk.strRead, out tk.fileName, out tk.line);
+	tk.strRead = sb.ToString();
+	tk.token = OUTPUT;
+	return true;
+}
+"'"
+{
+	var sb = new StringBuilder();
+	for (;;)
+	{
+		int ch = rd.Read().ch;
+		if (ch == -1) throw new Exception("EOF in string");
+		if (ch == '\'')
+			break;
+		if (ch == '\\')
+			ch = rd.Read().ch;
+		else
+			sb.Append((char)ch);
+	}
+
+	rd.SetMatch();
+	rd.EndToken(out tk.strRead, out tk.fileName, out tk.line);
+	tk.strRead = sb.ToString();
+	tk.token = CHS;
+	return true;
+}
+\/\/.*									^() 
+"/*"                                   
+{
+	for (;;)
+	{
+		if (rd.Peek().ch == -1) throw new Exception("EOF in comment");
+		if (rd.Read().ch == '*' && rd.Peek().ch == '/')
+		{
+			rd.Read();
+			break;
+		}
+	}
+	rd.SetMatch();
+	rd.EndToken(out tk.strRead, out tk.fileName, out tk.line);
+	return false;
+}
+(\ |\n|\r|\t)+							^()
+
+%parser 
+%parser.class LLParser
+%parser.using System
+%parser.using System.Text
+%parser.namespace BigBuns.Generator.Target
+
+start<RuleBlock>
+	: rule 																		^new RuleBlock($1)
+	| start ';' rule															^$1.Add($3)
+	;
+
+rule<Statment>
+	: decl																		^$1
+	| stmt																		^$1
+	;
+
+decl<Decl>
+	: LET ID argse '=' stmtlist													^new Decl($2, $3, $5)
+	;
+
+stmtlist<StmtBlock>
+	: stmt																		^new StmtBlock($1)
+	| stmtlist NEWLINE stmt														^$1.Add($3)
+	;
+
+stmt<Statment>
+	: MATCH e WITH matches														^new Match($1, $3)
+	| IMPORT pathes																^new Import($2)
+	| IMPORT pathes AS ID														^new Import($2, $4)
+	| EXPORT pathes																^new Export($2)
+	| EXPORT pathes AS ID														^new Export($2, $4)														
+	;
+
+matches<MatchCases>
+	: match_case																^new MatchCases($1)
+	| matches '|' match_case													^$1.Add($3)
+	;
+
+match_case<MatchCase>
+	: elist	OUTPUT																^new MatchCase($1, $2)
+	| '_' OUTPUT																^new MatchDefault($2)
+	;
+
+e<ExprRoot>
+	: e_oror																	^$1
+	;
+
+e_oror<ExprRoot>
+	: e_oror OROR e_andand														^new ExprOROR($1, $3)
+	| e_andand																	^$1
+	;
+
+e_andand<ExprRoot>
+	: e_andand ANDAND e_or														^new ExprAndAnd($1, $3)
+	| e_or																		^$1
+	;
+
+e_or<ExprRoot>
+	: e_or '|' e_xor															^new ExprOr($1, $3)
+	| e_xor																		^$1
+	;
+
+e_xor<ExprRoot>
+	: e_xor '^' e_and															^new ExprXor($1, $3)
+	| e_and																		^$1
+	;
+
+e_and<ExprRoot>
+	: e_and '&' e_eq															^new ExprAnd($1, $3)
+	| e_eq																		^$1
+	;
+
+e_eq<ExprRoot>
+	: e_eq EQ e_cmp																^new ExprEqual($1, $3)
+	| e_eq NE e_cmp																^new ExprNotEqual($1, $3)
+	| e_cmp																		^$1
+	;
+
+e_cmp<ExprRoot>
+	: e_cmp LT e_shift															^new ExprLessThen($1, $3)
+	| e_cmp LE e_shift															^new ExprLessEqual($1, $3)
+	| e_cmp GT e_shift															^new ExprGreaterThen($1, $3)
+	| e_cmp GE e_shift															^new ExprGreaterEqual($1, $3)
+	| e_shift																	^$1
+	;
+
+e_shift<ExprRoot>
+	: e_shift LSH e_add															^new ExprLeftShift($1, $3)
+	| e_shift RSH e_add															^new ExprRightShift($1, $3)
+	| e_add																		^$1
+	;
+
+e_add<ExprRoot>
+	: e_add '+' e_mul															^new ExprAdd($1, $3)
+	| e_add '-' e_mul															^new ExprSub($1, $3)
+	| e_mul																		^$1
+	;
+
+e_mul<ExprRoot>
+	: e_una																		^$1
+	| e_mul '*' e_una															^new ExprMul($1, $3)
+	| e_mul '/' e_una															^new ExprDiv($1, $3)
+	| e_mul '%' e_una															^new ExprRem($1, $3)
+	;
+
+e_una<ExprRoot>
+	: e_prim																	^$1
+	| '-' e_una																	^new ExprNeg($2)
+	| '+' e_una																	^new ExprPlus($2)
+	| INC e_una																	^new ExprPreInc($2)
+	| DEC e_una																	^new ExprPreDec($2)
+	;
+
+e_prim<ExprRoot>
+	: NUM																		^new ExprNum($1)
+	| HEX																		^new ExprNum($1)
+	| TRUE																		^new ExprNum(1)
+	| FALSE																		^new ExprNum(0)
+	| CHS																		^new ExprData($1)
+	| READ																		^new ExprRead()
+	| ID																		^new ExprIdentifier($1)
+	| e_prim '(' eliste ')'														^new ExprCall($1, $2)
+	| e_prim '[' elist ']'														^new ExprIndex($1, $3)
+	| e_prim INC																^new ExprPostInc($1)
+	| e_prim DEC																^new ExprPostDec($1)
+	| '(' elist ')'																^new ExprTupe($2)
+	;
+
+eliste<ExprList>
+	:																			^new ExprList()
+	| elist																		^$1
+	;
+
+elist<ExprList>
+	: e																			^new ExprList($1)
+	| elist ',' e																^$1.Add($3)
+	;
+
+pathes<PathArgs>
+	: ID																		^new PathArgs($1)
+	| pathes '.' ID																^$1.Add($3)
+	;
+
+argse<Args>
+	:																			^new Args()
+	| args																		^$1
+	;
+
+args<Args>
+	: ID																		^new Args($1)
+	| args ',' ID																^$1.Add($3)
+	;
+
